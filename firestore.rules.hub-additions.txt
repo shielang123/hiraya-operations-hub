@@ -1,0 +1,99 @@
+// FIRESTORE RULES FOR THE FOUR-SYSTEM RESORT (Hub, Bar Counter, Housekeeping)
+//
+// Do NOT replace your existing rules with this file. The booking site depends on them.
+// Open Firebase console > Firestore Database > Rules, then paste the helper functions and the
+// match blocks below INSIDE your existing:  match /databases/{database}/documents { ... }
+//
+// Firestore allows a request when ANY matching rule allows it, so these blocks add staff access
+// without removing what the booking site already has. If your booking rules already define a
+// match block for bookings or rooms, merge the "allow" lines into it instead of repeating the block.
+// Keep a copy of your current rules before publishing. Test each role in the Rules Playground.
+
+function staffDoc() {
+  return get(/databases/$(database)/documents/staff/$(request.auth.uid)).data;
+}
+function isStaff() {
+  return request.auth != null
+    && exists(/databases/$(database)/documents/staff/$(request.auth.uid))
+    && staffDoc().active == true;
+}
+function hasRole(roles) {
+  return isStaff() && staffDoc().role in roles;
+}
+function isAdmin() { return hasRole(['admin']); }
+function onlyChanges(keys) {
+  return request.resource.data.diff(resource.data).affectedKeys().hasOnly(keys);
+}
+
+// ---- staff: each person reads their own profile; admins manage everyone
+match /staff/{uid} {
+  allow read: if request.auth != null && (request.auth.uid == uid || isAdmin());
+  allow create, update: if isAdmin();
+  allow delete: if false;
+}
+
+// ---- bookings: owned by Room Booking. Staff update only the fields the Hub changes.
+match /bookings/{bookingId} {
+  allow read: if hasRole(['admin', 'frontdesk', 'bar']);   // bar reads checked-in bookings to charge a room
+  allow update: if hasRole(['admin', 'frontdesk'])
+    && onlyChanges(['status', 'checkedInAt', 'checkedInBy', 'checkedOutAt', 'checkedOutBy',
+                    'balanceAtCheckout', 'overrideReason', 'staffNote', 'updatedAt']);
+}
+
+// ---- rooms: owned by Room Booking. Cleaning status is the only field staff change.
+match /rooms/{roomId} {
+  allow read: if isStaff();
+  allow update: if hasRole(['admin', 'frontdesk', 'housekeeping']) && onlyChanges(['cleaningStatus']);
+}
+
+// ---- charges: Hub creates (source hub), Bar Counter creates room charges (source bar). Never deleted.
+match /charges/{chargeId} {
+  allow read: if hasRole(['admin', 'frontdesk']);
+  allow create: if (hasRole(['admin', 'frontdesk']) && request.resource.data.source == 'hub')
+                || (hasRole(['admin', 'bar']) && request.resource.data.source == 'bar');
+  allow update: if hasRole(['admin', 'frontdesk', 'bar'])
+    && onlyChanges(['voided', 'voidReason', 'voidedBy', 'voidedAt']);
+  allow delete: if false;
+}
+
+// ---- payments: front desk records cash, GCash, card, bank payments. Append only.
+match /payments/{paymentId} {
+  allow read, create: if hasRole(['admin', 'frontdesk']);
+  allow update, delete: if false;
+}
+
+// ---- menuItems and orders: owned by Bar Counter. The Hub only reads.
+match /menuItems/{itemId} {
+  allow read: if isStaff();
+  allow write: if hasRole(['admin', 'bar']);
+}
+match /orders/{orderId} {
+  allow read: if hasRole(['admin', 'frontdesk', 'bar']);
+  allow create, update: if hasRole(['admin', 'bar']);
+  allow delete: if false;
+}
+
+// ---- housekeepingTasks: Hub creates one at check-out; cleaners update their own tasks.
+match /housekeepingTasks/{taskId} {
+  allow read: if hasRole(['admin', 'frontdesk'])
+              || (hasRole(['housekeeping']) && resource.data.assignedTo == request.auth.uid);
+  allow create: if hasRole(['admin', 'frontdesk'])
+                || (hasRole(['housekeeping']) && request.resource.data.type == 'maintenance-report');
+  allow update: if isAdmin()
+                || (hasRole(['housekeeping']) && resource.data.assignedTo == request.auth.uid
+                    && onlyChanges(['status', 'startedAt', 'doneAt', 'note']));
+  allow delete: if false;
+}
+
+// ---- settings: hub brand/theme. Staff may read; only admin writes.
+match /settings/{id} {
+  allow read: if isStaff();
+  allow write: if isAdmin();
+}
+
+// ---- activityLog: any staff app appends, everyone reads, nobody edits.
+match /activityLog/{logId} {
+  allow read: if isStaff();
+  allow create: if isStaff();
+  allow update, delete: if false;
+}

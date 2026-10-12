@@ -1,0 +1,36 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --hub-sidebar: #1a4a32;
+  --hub-accent: #5a8c3e;
+  --hub-page: #f4efe6;
+  --hub-card: #ffffff;
+  --hub-border: #e4ddd0;
+  --hub-text: #1f2a24;
+  --hub-muted: #6b7c70;
+}
+
+body {
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  background: var(--hub-page);
+  color: var(--hub-text);
+}
+
+/* Printable guest bill: hide the app chrome */
+@media print {
+  .no-print {
+    display: none !important;
+  }
+  body {
+    background: white;
+  }
+  main {
+    padding: 0 !important;
+    max-width: none !important;
+  }
+  .min-h-screen {
+    padding-left: 0 !important;
+  }
+}
